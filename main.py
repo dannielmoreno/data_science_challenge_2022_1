@@ -1,6 +1,5 @@
 ##
 import glob
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -16,11 +15,10 @@ import torch.optim as optim
 import pandas as pd
 from tqdm import tqdm
 
-labels_df = pd.read_csv('labels.csv')
-class2name_dict = dict(labels_df.values)
 
-batch_size = 20
-epochs = 10
+# labels_df = pd.read_csv('labels.csv')
+# class2name_dict = dict(labels_df.values)
+
 
 class TrainTrafficDataset(Dataset):
     def __init__(self, datapath, transform):
@@ -33,7 +31,8 @@ class TrainTrafficDataset(Dataset):
         image = read_image(img_path)/255
         if self.transform:
             image = self.transform(image)
-        class_id = int(img_path.split('\\')[2])
+        #breakpoint()
+        class_id = int(img_path.split('/')[2])
         return image, class_id
 
 class TestTrafficDataset(Dataset):
@@ -47,7 +46,7 @@ class TestTrafficDataset(Dataset):
         image = read_image(img_path)/255
         if self.transform:
             image = self.transform(image)
-        class_id = int(img_path.split('\\')[2].split('_')[0])
+        class_id = int(img_path.split('/')[2].split('_')[0])
         return image, class_id
 
 class Model1(nn.Module):
@@ -69,18 +68,37 @@ class Model1(nn.Module):
         x = self.fc3(x)
         return x
 
-def evaluate(model, trainloader, testloader):
+class Model2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 6, 5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.fc1 = nn.Linear(13456, 1024)
+        self.fc2 = nn.Linear(1024, 58)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = torch.flatten(x, 1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+def evaluate(model, trainloader, testloader, device):
     correct_train, total_train, correct_test, total_test = 0, 0, 0, 0
     with torch.no_grad():
         for data in trainloader:
-            images, labels = data
-            outputs = model(images)
+            inputs, labels = data
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
             _, predicted = torch.max(outputs.data, 1)
             total_train += labels.size(0)
             correct_train += (predicted == labels).sum().item()
         for data in testloader:
-            images, labels = data
-            outputs = model(images)
+            inputs, labels = data
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
             _, predicted = torch.max(outputs.data, 1)
             total_test += labels.size(0)
             correct_test += (predicted == labels).sum().item()
@@ -90,7 +108,7 @@ def evaluate(model, trainloader, testloader):
 
 
 
-def train(model, criterion, optimizer, epochs, trainloader, testloader, savepath=None):
+def train(model, criterion, optimizer, epochs, trainloader, testloader, device, savepath=None):
     loss_list = []
     train_acc_list = []
     test_acc_list = []
@@ -98,6 +116,7 @@ def train(model, criterion, optimizer, epochs, trainloader, testloader, savepath
         running_loss = 0.0
         for i, data in tqdm(enumerate(trainloader, 0)):
             inputs, labels = data
+            inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
@@ -105,7 +124,7 @@ def train(model, criterion, optimizer, epochs, trainloader, testloader, savepath
             optimizer.step()
             running_loss += loss.item()
         print("Evaluating")
-        train_accuracy, test_accuracy = evaluate(model, trainloader, testloader)
+        train_accuracy, test_accuracy = evaluate(model, trainloader, testloader, device)
         print(f"Epoch {epoch} - Loss: {running_loss} train_acc: {train_accuracy} test_acc: {test_accuracy}")
         loss_list.append(running_loss)
         train_acc_list.append(train_accuracy)
@@ -114,7 +133,7 @@ def train(model, criterion, optimizer, epochs, trainloader, testloader, savepath
         torch.save(model.state_dict(), savepath)
     return model, loss_list, train_acc_list, test_acc_list
 
-def result_visualization(loss_list, train_acc_list, test_acc_list, model_id, experiment_id, save=False):
+def result_visualization(epochs, loss_list, train_acc_list, test_acc_list, model_id, experiment_id, save=False):
 
     plt.figure()
     plt.plot(range(epochs), loss_list)
@@ -139,10 +158,13 @@ def result_visualization(loss_list, train_acc_list, test_acc_list, model_id, exp
     plt.show()
 
 
-def main(epochs=10, batch_size=20, model_id=1, experiment_id=1):
+def main(epochs, batch_size, model_id, experiment_id):
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     tsfm = transforms.Compose([
-        transforms.Resize((128, 128))
+        transforms.Resize((128, 128)),
+        transforms.Normalize((0.4323, 0.4203, 0.4275),
+                             (0.2423, 0.2318, 0.2463))
     ])
 
     train_datapath = os.path.join("traffic_Data", "DATA")
@@ -150,21 +172,25 @@ def main(epochs=10, batch_size=20, model_id=1, experiment_id=1):
 
     trainset = TrainTrafficDataset(train_datapath, tsfm)
     testset = TestTrafficDataset(test_datapath, tsfm)
+    print(len(trainset))
 
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=False)
 
     model = Model1()
+    model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
     model_savepath = os.path.join("models", "model_"+str(model_id)+"_"+str(experiment_id)+".pth")
 
-    model, loss_list, train_acc_list, test_acc_list = train(model, criterion, optimizer, epochs, trainloader, testloader, model_savepath)
+    model, loss_list, train_acc_list, test_acc_list = train(model, criterion, optimizer, epochs, trainloader,
+                                                            testloader, device, model_savepath)
 
-    result_visualization(loss_list, train_acc_list, test_acc_list, model_id, experiment_id, save=True)
+    result_visualization(epochs, loss_list, train_acc_list, test_acc_list, model_id, experiment_id, save=True)
 
-main()
+main(epochs=10, batch_size=64, model_id=1, experiment_id=5)
+
 
 
 
