@@ -12,7 +12,7 @@ def load_test_paths(base_path):
     return file_df
 if __name__ == "__main__":
     #load data
-    Test_data=load_test_paths('./traffic_data/TEST')
+    Test_data=load_test_paths('./traffic_Data/TEST')
     #load model
     model=Model()
     Test_data['prediction']=Test_data.file.map(model.predict)

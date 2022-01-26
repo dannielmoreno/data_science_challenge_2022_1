@@ -15,10 +15,7 @@ import torch.optim as optim
 import pandas as pd
 from tqdm import tqdm
 
-
-# labels_df = pd.read_csv('labels.csv')
-# class2name_dict = dict(labels_df.values)
-
+# Train and test dataset classes for loading the data to the PyTorch model easily
 
 class TrainTrafficDataset(Dataset):
     def __init__(self, datapath, transform):
@@ -49,6 +46,8 @@ class TestTrafficDataset(Dataset):
         class_id = int(img_path.split('/')[2].split('_')[0])
         return image, class_id
 
+# Classes associated to CNN models trained from scratch
+
 class Model1(nn.Module):
     def __init__(self):
         super().__init__()
@@ -68,10 +67,10 @@ class Model1(nn.Module):
         x = self.fc3(x)
         return x
 
-class Model2(nn.Module):
+class Model5(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
+        self.conv1 = nn.Conv2d(3, 6, 20)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
         self.fc1 = nn.Linear(13456, 1024)
@@ -85,8 +84,11 @@ class Model2(nn.Module):
         x = self.fc2(x)
         return x
 
+# Function that evaluates a model accuracy in train and test set
+
 def evaluate(model, trainloader, testloader, device):
     correct_train, total_train, correct_test, total_test = 0, 0, 0, 0
+    model.eval()
     with torch.no_grad():
         for data in trainloader:
             inputs, labels = data
@@ -106,7 +108,8 @@ def evaluate(model, trainloader, testloader, device):
     test_accuracy = correct_test * 100 / total_test
     return train_accuracy, test_accuracy
 
-
+# Function associated to training a model for a given number of epochs and evaluating the model performance during
+# each epoch
 
 def train(model, criterion, optimizer, epochs, trainloader, testloader, device, savepath=None):
     loss_list = []
@@ -114,6 +117,7 @@ def train(model, criterion, optimizer, epochs, trainloader, testloader, device, 
     test_acc_list = []
     for epoch in range(epochs):
         running_loss = 0.0
+        model.train()
         for i, data in tqdm(enumerate(trainloader, 0)):
             inputs, labels = data
             inputs, labels = inputs.to(device), labels.to(device)
@@ -132,6 +136,8 @@ def train(model, criterion, optimizer, epochs, trainloader, testloader, device, 
     if savepath is not None:
         torch.save(model.state_dict(), savepath)
     return model, loss_list, train_acc_list, test_acc_list
+
+# Function that creates and saves loss and accuracy graphs for training and test sets
 
 def result_visualization(epochs, loss_list, train_acc_list, test_acc_list, model_id, experiment_id, save=False):
 
@@ -157,30 +163,48 @@ def result_visualization(epochs, loss_list, train_acc_list, test_acc_list, model
         plt.savefig(os.path.join("results", "acc_" + str(model_id) + "_" + str(experiment_id) + ".png"))
     plt.show()
 
+# Main Function
 
-def main(epochs, batch_size, model_id, experiment_id):
+def main(epochs, lr, batch_size, model_id, experiment_id):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    tsfm = transforms.Compose([
+
+    train_datapath = os.path.join("traffic_Data", "DATA")
+    test_datapath = os.path.join("traffic_Data", "TEST")
+
+    tsfm_train = transforms.Compose([
+        transforms.Resize((128, 128)),
+        transforms.Normalize((0.4323, 0.4203, 0.4275),
+                             (0.2423, 0.2318, 0.2463)),
+        transforms.ColorJitter(),
+        transforms.RandomRotation(5)
+
+    ])
+    tsfm_test = transforms.Compose([
         transforms.Resize((128, 128)),
         transforms.Normalize((0.4323, 0.4203, 0.4275),
                              (0.2423, 0.2318, 0.2463))
     ])
 
-    train_datapath = os.path.join("traffic_Data", "DATA")
-    test_datapath = os.path.join("traffic_Data", "TEST")
-
-    trainset = TrainTrafficDataset(train_datapath, tsfm)
-    testset = TestTrafficDataset(test_datapath, tsfm)
+    trainset = TrainTrafficDataset(train_datapath, tsfm_train)
+    testset = TestTrafficDataset(test_datapath, tsfm_test)
     print(len(trainset))
 
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=False)
 
-    model = Model1()
+    model = Model5()
     model.to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+
+    train_paths = glob.glob(os.path.join("traffic_Data", "DATA", "*", "*.png"))
+    counts = np.zeros(58)
+    for path in train_paths:
+        class_id = int(path.split("/")[2])
+        counts[class_id] += 1
+    weights = 1 / counts
+    weights = weights.astype(np.float32)
+    criterion = nn.CrossEntropyLoss(weight=torch.from_numpy(weights).to(device))
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
     model_savepath = os.path.join("models", "model_"+str(model_id)+"_"+str(experiment_id)+".pth")
 
@@ -189,7 +213,13 @@ def main(epochs, batch_size, model_id, experiment_id):
 
     result_visualization(epochs, loss_list, train_acc_list, test_acc_list, model_id, experiment_id, save=True)
 
-main(epochs=10, batch_size=64, model_id=1, experiment_id=5)
+epochs = None
+lr = None
+batch_size = None
+model_id = None
+experiment_id = None
+
+main(epochs=epochs, lr=lr, batch_size=batch_size, model_id=model_id, experiment_id=experiment_id)
 
 
 
